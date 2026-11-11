@@ -345,6 +345,9 @@ class ScrubberState extends ConsumerState<Scrubber> with TickerProviderStateMixi
           : null;
     }
 
+    final safePadding = MediaQuery.paddingOf(ctx);
+    final endInset = Directionality.of(ctx) == TextDirection.rtl ? safePadding.left : safePadding.right;
+
     return NotificationListener<ScrollNotification>(
       onNotification: _onScrollNotification,
       child: Stack(
@@ -356,13 +359,14 @@ class ScrubberState extends ConsumerState<Scrubber> with TickerProviderStateMixi
               key: ValueKey('segments_${_isDragging}_${_segments.length}'),
               segments: _segments,
               topPadding: widget.topPadding,
+              endInset: endInset,
               isDragging: _isDragging,
             ),
           ),
           if (_scrollController.hasClients && _scrollController.position.maxScrollExtent > 0)
             PositionedDirectional(
               top: _thumbTopOffset + widget.topPadding,
-              end: 0,
+              end: endInset,
               child: RepaintBoundary(
                 child: GestureDetector(
                   onVerticalDragStart: _onDragStart,
@@ -381,9 +385,16 @@ class ScrubberState extends ConsumerState<Scrubber> with TickerProviderStateMixi
 class _SegmentsLayer extends StatelessWidget {
   final List<_Segment> segments;
   final double topPadding;
+  final double endInset;
   final bool isDragging;
 
-  const _SegmentsLayer({super.key, required this.segments, required this.topPadding, required this.isDragging});
+  const _SegmentsLayer({
+    super.key,
+    required this.segments,
+    required this.topPadding,
+    required this.endInset,
+    required this.isDragging,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -396,7 +407,7 @@ class _SegmentsLayer extends StatelessWidget {
               (segment) => PositionedDirectional(
                 key: ValueKey('segment_${segment.date.millisecondsSinceEpoch}'),
                 top: topPadding + segment.startOffset,
-                end: 100,
+                end: 100 + endInset,
                 child: RepaintBoundary(child: _SegmentWidget(segment)),
               ),
             )

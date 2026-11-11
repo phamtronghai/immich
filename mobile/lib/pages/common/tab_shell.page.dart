@@ -9,6 +9,7 @@ import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/pages/search/paginated_search.provider.dart';
+import 'package:immich_mobile/presentation/widgets/navigation/floating_navigation_bar.widget.dart';
 import 'package:immich_mobile/providers/haptic_feedback.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
@@ -26,53 +27,59 @@ class TabShellPage extends ConsumerStatefulWidget {
 }
 
 class _TabShellPageState extends ConsumerState<TabShellPage> {
+  bool _isNavigationBarHidden = false;
+  StreamSubscription? _multiSelectSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _multiSelectSubscription = EventStream.shared.listen<MultiSelectToggleEvent>(
+      (event) => setState(() => _isNavigationBarHidden = event.isEnabled),
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_multiSelectSubscription?.cancel());
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isScreenLandscape = context.orientation == Orientation.landscape;
     final isReadonlyModeEnabled = ref.watch(readonlyModeProvider);
 
-    final navigationDestinations = [
-      NavigationDestination(
+    final destinations = [
+      FloatingNavigationDestination(
+        tabIndex: kPhotoTabIndex,
         label: context.t.photos,
-        icon: const Icon(Icons.photo_library_outlined),
-        selectedIcon: Icon(Icons.photo_library, color: context.primaryColor),
+        icon: Icons.photo_library_rounded,
       ),
-      NavigationDestination(
-        label: context.t.search,
-        icon: const Icon(Icons.search_rounded),
-        selectedIcon: Icon(Icons.search, color: context.primaryColor),
-        enabled: !isReadonlyModeEnabled,
-      ),
-      NavigationDestination(
+      FloatingNavigationDestination(
+        tabIndex: kAlbumTabIndex,
         label: context.t.albums,
-        icon: const Icon(Icons.photo_album_outlined),
-        selectedIcon: Icon(Icons.photo_album_rounded, color: context.primaryColor),
+        icon: Icons.photo_album_rounded,
         enabled: !isReadonlyModeEnabled,
       ),
-      NavigationDestination(
+      FloatingNavigationDestination(
+        tabIndex: kLibraryTabIndex,
         label: context.t.library$,
-        icon: const Icon(Icons.space_dashboard_outlined),
-        selectedIcon: Icon(Icons.space_dashboard_rounded, color: context.primaryColor),
+        icon: Icons.space_dashboard_rounded,
         enabled: !isReadonlyModeEnabled,
       ),
     ];
 
-    Widget navigationRail(TabsRouter tabsRouter) {
-      return NavigationRail(
-        destinations: navigationDestinations
-            .map(
-              (e) => NavigationRailDestination(
-                icon: e.icon,
-                label: Text(e.label),
-                selectedIcon: e.selectedIcon,
-                disabled: !e.enabled,
-              ),
-            )
-            .toList(),
-        onDestinationSelected: (index) => _onNavigationSelected(tabsRouter, index, ref),
-        selectedIndex: tabsRouter.activeIndex,
-        labelType: NavigationRailLabelType.all,
-        groupAlignment: 0.0,
+    Widget navigationBar(TabsRouter tabsRouter, Axis axis) {
+      if (_isNavigationBarHidden) {
+        return const SizedBox.shrink();
+      }
+
+      return _NavigationBar(
+        tabsRouter: tabsRouter,
+        destinations: destinations,
+        searchLabel: context.t.search,
+        isSearchEnabled: !isReadonlyModeEnabled,
+        axis: axis,
       );
     }
 
@@ -87,16 +94,15 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
           onPopInvokedWithResult: (didPop, _) => !didPop ? tabsRouter.setActiveIndex(0) : null,
           child: Scaffold(
             resizeToAvoidBottomInset: false,
+            extendBody: true,
             body: isScreenLandscape
-                ? Row(
-                    children: [
-                      navigationRail(tabsRouter),
-                      const VerticalDivider(),
-                      Expanded(child: child),
-                    ],
+                ? _LandscapeNavigationOverlay(
+                    navigationBar: navigationBar(tabsRouter, Axis.vertical),
+                    isHidden: _isNavigationBarHidden,
+                    child: child,
                   )
                 : child,
-            bottomNavigationBar: _BottomNavigationBar(tabsRouter: tabsRouter, destinations: navigationDestinations),
+            bottomNavigationBar: isScreenLandscape ? null : navigationBar(tabsRouter, Axis.horizontal),
           ),
         );
       },
@@ -133,50 +139,58 @@ void _onNavigationSelected(TabsRouter router, int index, WidgetRef ref) {
   ref.read(tabProvider.notifier).state = TabEnum.values[index];
 }
 
-class _BottomNavigationBar extends ConsumerStatefulWidget {
-  const _BottomNavigationBar({required this.tabsRouter, required this.destinations});
+class _LandscapeNavigationOverlay extends StatelessWidget {
+  const _LandscapeNavigationOverlay({required this.navigationBar, required this.isHidden, required this.child});
 
-  final List<Widget> destinations;
-  final TabsRouter tabsRouter;
-
-  @override
-  ConsumerState createState() => _BottomNavigationBarState();
-}
-
-class _BottomNavigationBarState extends ConsumerState<_BottomNavigationBar> {
-  bool hideNavigationBar = false;
-  StreamSubscription? _eventSubscription;
-
-  @override
-  void initState() {
-    super.initState();
-    _eventSubscription = EventStream.shared.listen<MultiSelectToggleEvent>(_onEvent);
-  }
-
-  void _onEvent(MultiSelectToggleEvent event) {
-    setState(() {
-      hideNavigationBar = event.isEnabled;
-    });
-  }
-
-  @override
-  void dispose() {
-    unawaited(_eventSubscription?.cancel());
-    super.dispose();
-  }
+  final Widget navigationBar;
+  final bool isHidden;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final isScreenLandscape = context.orientation == Orientation.landscape;
+    final mediaQuery = MediaQuery.of(context);
+    final overlayWidth = isHidden
+        ? mediaQuery.padding.right
+        : FloatingNavigationBar.verticalOverlayWidth(mediaQuery.padding);
 
-    if (isScreenLandscape || hideNavigationBar) {
-      return const SizedBox.shrink();
-    }
+    return Stack(
+      children: [
+        MediaQuery(
+          data: mediaQuery.copyWith(padding: mediaQuery.padding.copyWith(right: overlayWidth)),
+          child: child,
+        ),
+        Positioned(top: 0, right: 0, bottom: 0, child: navigationBar),
+      ],
+    );
+  }
+}
 
-    return NavigationBar(
-      selectedIndex: widget.tabsRouter.activeIndex,
-      onDestinationSelected: (index) => _onNavigationSelected(widget.tabsRouter, index, ref),
-      destinations: widget.destinations,
+class _NavigationBar extends ConsumerWidget {
+  const _NavigationBar({
+    required this.tabsRouter,
+    required this.destinations,
+    required this.searchLabel,
+    required this.isSearchEnabled,
+    required this.axis,
+  });
+
+  final List<FloatingNavigationDestination> destinations;
+  final String searchLabel;
+  final bool isSearchEnabled;
+  final Axis axis;
+  final TabsRouter tabsRouter;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FloatingNavigationBar(
+      destinations: destinations,
+      activeTabIndex: tabsRouter.activeIndex,
+      searchTabIndex: kSearchTabIndex,
+      searchLabel: searchLabel,
+      isSearchEnabled: isSearchEnabled,
+      axis: axis,
+      onDestinationSelected: (index) => _onNavigationSelected(tabsRouter, index, ref),
+      onSearchSelected: () => _onNavigationSelected(tabsRouter, kSearchTabIndex, ref),
     );
   }
 }
